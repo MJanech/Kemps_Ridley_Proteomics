@@ -1,17 +1,30 @@
-# Reviewer validation: tie-robust NP-ranked Reactome fgsea
-# Uses ONLY original nonparametric framework: Mann-Whitney U (S4/S5)
-# and paired Wilcoxon signed-rank (S6/S7). No limma statistics are used.
+# ==============================================================================
+# GSEA_nonparametric_ranked_analysis.R
 #
-# Purpose: remove arbitrary ordering of tied preranked statistics in fgsea.
-# Primary rank score is unchanged:
-#   rank-biserial correlation * [-log10(original NP p-value)]
-# Exact ties in that primary score are broken deterministically using a
-# Hodges-Lehmann nonparametric location-shift estimate:
+# Purpose
+#   Reproduce the tie-robust preranked Reactome GSEA used in the revised
+#   manuscript.
+#
+# Relationship to the primary protein-level analysis
+#   - limma-trend is the PRIMARY protein-level differential-abundance analysis.
+#   - This GSEA uses a separate NONPARAMETRIC RANKING STATISTIC constructed from
+#     the Mann-Whitney U results (S4/S5) and paired Wilcoxon results (S6/S7).
+#   - The use of a nonparametric ranking statistic for pathway analysis does not
+#     change the designation of limma-trend as the primary protein-level test.
+#   - No limma statistics are used to construct the reported GSEA ranking.
+#
+# GSEA ranking score
+#   rank-biserial correlation * [-log10(original nonparametric p-value)]
+#
+# Exact ties in that score are broken deterministically using a Hodges-Lehmann
+# nonparametric location-shift estimate:
 #   S4/S5: median of all pairwise (B - A) differences
 #   S6/S7: Wilcoxon paired Hodges-Lehmann pseudomedian (Walsh averages)
-# A tiny numerical offset is then added ONLY within tied primary-score groups,
-# small enough that it cannot change the ordering of distinct primary scores.
+#
+# A tiny numerical offset is added ONLY within tied ranking-score groups,
+# small enough that it cannot change the ordering of distinct scores.
 # fgsea is run serially to avoid Windows/RStudio parallel serialization warnings.
+# ==============================================================================
 
 required <- c("readxl", "fgsea", "msigdbr", "BiocParallel")
 missing_pkgs <- required[!vapply(required, requireNamespace, logical(1), quietly=TRUE)]
@@ -28,7 +41,7 @@ args <- commandArgs(trailingOnly = TRUE)
 xlsx <- if (length(args) >= 1 && nzchar(args[1])) {
   args[1]
 } else {
-  "Supplemental_Tables_1_through_8.xlsx"
+  "Supplemental_Tables_1_through_8_Limma_Primary.xlsx"
 }
 if (!file.exists(xlsx)) {
   stop("Cannot find ", xlsx, " in working directory: ", getwd())
@@ -41,6 +54,35 @@ trim <- function(x) {
   x <- trimws(as.character(x))
   x[is.na(x) | x == ""] <- NA_character_
   x
+}
+
+normalize_name <- function(x) {
+  tolower(gsub("[^a-z0-9]", "", x))
+}
+
+find_column <- function(data, candidates) {
+  normalized <- normalize_name(names(data))
+  targets <- normalize_name(candidates)
+  hit <- which(normalized %in% targets)
+
+  if (length(hit) == 0) {
+    return(NA_character_)
+  }
+
+  names(data)[hit[1]]
+}
+
+require_column <- function(data, candidates, label) {
+  hit <- find_column(data, candidates)
+
+  if (is.na(hit)) {
+    stop(
+      label, " is missing a required column. Expected one of: ",
+      paste(candidates, collapse = ", ")
+    )
+  }
+
+  hit
 }
 
 hl_independent <- function(a, b) {
@@ -71,19 +113,46 @@ read_np_comp <- function(sheet, skip, nA, nB, labelA, labelB, test_name, paired=
   A <- as.data.frame(lapply(d[Acols], as.numeric))
   B <- as.data.frame(lapply(d[Bcols], as.numeric))
 
-  pcol <- grep("^p\\.value$", names(d))
-  qcol <- grep("^padj_BH$", names(d))
-  rcol <- grep("Rank-biserial Correlation", names(d), fixed=TRUE)
-  if (length(pcol) != 1) stop("Could not uniquely identify p.value in ", sheet)
-  if (length(qcol) != 1) stop("Could not uniquely identify padj_BH in ", sheet)
-  if (length(rcol) != 1) stop("Could not uniquely identify rank-biserial correlation in ", sheet)
+  if (grepl("Mann-Whitney", test_name, fixed = TRUE)) {
+    pcol <- require_column(
+      d,
+      c("MW p", "Mann-Whitney p", "Mann–Whitney p", "p.value"),
+      sheet
+    )
+    qcol <- require_column(
+      d,
+      c("MW BH FDR", "Mann-Whitney BH FDR", "Mann–Whitney BH FDR", "padj_BH"),
+      sheet
+    )
+  } else {
+    pcol <- require_column(
+      d,
+      c("Wilcoxon p", "p.value"),
+      sheet
+    )
+    qcol <- require_column(
+      d,
+      c("Wilcoxon BH FDR", "padj_BH"),
+      sheet
+    )
+  }
+
+  rcol <- require_column(
+    d,
+    c(
+      "Rank-biserial Correlation",
+      "Rank-biserial Correlation (positive = OC4 higher)",
+      "Rank-biserial Correlation (positive = Rehabilitation higher)"
+    ),
+    sheet
+  )
 
   d$p_raw <- as.numeric(d[[pcol]])
   d$padj_BH_original <- as.numeric(d[[qcol]])
   d$rank_biserial <- as.numeric(d[[rcol]])
 
   safe_p <- pmax(d$p_raw, .Machine$double.xmin, na.rm=FALSE)
-  d$NP_primary_score <- d$rank_biserial * (-log10(safe_p))
+  d$NP_rank_score <- d$rank_biserial * (-log10(safe_p))
 
   # Nonparametric tie-break effect estimate computed directly from the same data.
   if (paired) {
@@ -122,12 +191,12 @@ direction_notes <- c(
 )
 
 # Collapse multiple accessions to one gene symbol using the strongest absolute
-# primary NP score. If tied, use smaller p, then larger absolute HL shift.
+# nonparametric GSEA ranking score. If tied, use smaller p, then larger absolute HL shift.
 collapse_to_gene <- function(nm, d) {
-  z <- d[!is.na(d$Gene) & is.finite(d$NP_primary_score) & is.finite(d$p_raw) & is.finite(d$rank_biserial),
+  z <- d[!is.na(d$Gene) & is.finite(d$NP_rank_score) & is.finite(d$p_raw) & is.finite(d$rank_biserial),
          c("Gene","Protein","Accession","p_raw","padj_BH_original",
-           "rank_biserial","NP_primary_score","HL_shift_B_minus_A")]
-  z$Abs_primary <- abs(z$NP_primary_score)
+           "rank_biserial","NP_rank_score","HL_shift_B_minus_A")]
+  z$Abs_primary <- abs(z$NP_rank_score)
   z$Abs_HL <- abs(z$HL_shift_B_minus_A)
   z$Abs_HL[!is.finite(z$Abs_HL)] <- -Inf
   z <- z[order(-z$Abs_primary, z$p_raw, -z$Abs_HL, z$Accession), , drop=FALSE]
@@ -135,9 +204,9 @@ collapse_to_gene <- function(nm, d) {
   z
 }
 
-# Break ONLY exact ties in primary score. Distinct primary scores never cross.
+# Break ONLY exact ties in ranking score. Distinct ranking scores never cross.
 make_tie_robust_scores <- function(z) {
-  primary <- z$NP_primary_score
+  primary <- z$NP_rank_score
   hl <- z$HL_shift_B_minus_A
   genes <- z$Gene
 
@@ -196,7 +265,7 @@ for (nm in names(comps)) {
   z$NP_tie_robust_score <- tieinfo$score
   z <- z[order(z$NP_tie_robust_score, decreasing=TRUE), , drop=FALSE]
 
-  before_ties <- sum(duplicated(z$NP_primary_score[z$NP_primary_score != 0]))
+  before_ties <- sum(duplicated(z$NP_rank_score[z$NP_rank_score != 0]))
   before_pct <- 100 * before_ties / nrow(z)
   after_ties <- sum(duplicated(z$NP_tie_robust_score[z$NP_tie_robust_score != 0]))
 
@@ -258,8 +327,8 @@ write.csv(summary_out, file.path(outdir, "NP_tie_robust_fgsea_summary.csv"), row
 cat("\nTIE-ROBUST NONPARAMETRIC FGSEA COMPLETE\n")
 cat("======================================\n")
 print(summary_out, row.names=FALSE)
-cat("\nPrimary ranking metric remains:\n")
+cat("\nGSEA ranking metric:\n")
 cat("  rank-biserial correlation * [-log10(original Mann-Whitney/Wilcoxon p-value)]\n")
 cat("Exact ties were broken ONLY with a Hodges-Lehmann nonparametric effect estimate.\n")
-cat("No limma statistics were used. fgsea was run serially.\n")
+cat("No limma statistics were used to construct the reported GSEA ranking. fgsea was run serially.\n")
 cat("Results folder:", normalizePath(outdir), "\n")

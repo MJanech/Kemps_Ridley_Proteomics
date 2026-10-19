@@ -1,13 +1,21 @@
-# Reviewer_revised_Figures6_7_NP_GSEA_v9_sidebyside_externallegend.R
+# ==============================================================================
+# GSEA_Figures6_7.R
 #
-# Updated rules for Figures 7A and 7B:
-# - keep BH legend OUTSIDE the data panel
-# - place BH legend immediately adjacent to the right edge of the plot
-# - narrow the physical NES plotting region for 7A and 7B so they fit side-by-side better
-# - preserve separate files for 7A and 7B
-# - keep 3 visible BH legend circles per figure
-# - keep common x-axis limits across all figures
-# - retain larger x-axis/legend fonts
+# Purpose
+#   Generate manuscript Figures 6 and 7 from the collapsed Reactome GSEA results.
+#
+# Statistical context
+#   - limma-trend is the PRIMARY protein-level differential-abundance analysis.
+#   - Figures 6 and 7 display the separate nonparametric preranked GSEA results.
+#   - No limma statistics are used in these pathway figures.
+#
+# Figure layout
+#   - BH-FDR legend is outside the data panel.
+#   - Figures 7A and 7B are sized for side-by-side use.
+#   - Three BH-FDR legend circles are shown per figure.
+#   - Common NES x-axis limits are used across all pathway figures.
+#   - PNG files are written at 600 dpi.
+# ==============================================================================
 
 if (!requireNamespace("ggplot2", quietly = TRUE)) {
   stop("Please install ggplot2 first with: install.packages('ggplot2')")
@@ -224,5 +232,5 @@ cat("BH-FDR legend placed outside the panel and close to the plot body.\n")
 cat("Larger x-axis and legend fonts retained.\n")
 cat("Output folder: ", normalizePath(out_dir, winslash = "/", mustWork = FALSE), "\n\n", sep = "")
 cat("PNG files are 600 dpi; matching PDF files were also written.\n")
-cat("No limma statistics were used.\n")
+cat("No limma statistics were used in these pathway figures.\n")
 

@@ -1,18 +1,26 @@
-# Reviewer validation: collapse redundant significant Reactome pathways
-# -------------------------------------------------------------------
-# This script uses the previously completed tie-robust NONPARAMETRIC fgsea results.
-# It does NOT use limma and does NOT rerun protein-level statistics.
+# ==============================================================================
+# GSEA_collapse_redundant_pathways.R
 #
-# Purpose:
-#   Replace the manuscript's arbitrary Jaccard-similarity pathway reduction with
-#   fgsea::collapsePathways(), which identifies a smaller set of "main pathways"
-#   by testing whether significant pathways provide independent enrichment signal.
+# Purpose
+#   Collapse redundant significant Reactome pathways from the completed
+#   tie-robust nonparametric preranked GSEA using fgsea::collapsePathways().
+#
+# Relationship to the primary protein-level analysis
+#   - limma-trend remains the PRIMARY protein-level differential-abundance test.
+#   - This script operates only on completed GSEA pathway results.
+#   - It does not rerun protein-level statistics and does not use limma.
+#
+# Method
+#   fgsea::collapsePathways() identifies a smaller set of representative
+#   "main pathways" by conditional enrichment/dependence testing.
+#   This replaces the earlier Jaccard-similarity pathway reduction.
 #
 # Required existing folder in the working directory:
 #   NP_ranked_fgsea_tie_robust
 #
-# Required R packages (already installed in the previous analysis):
+# Required R packages:
 #   fgsea, msigdbr, data.table
+# ==============================================================================
 
 required <- c("fgsea", "msigdbr", "data.table")
 missing_pkgs <- required[!vapply(required, requireNamespace, logical(1), quietly=TRUE)]
@@ -199,6 +207,6 @@ cat("\nNONREDUNDANT PATHWAY COLLAPSE COMPLETE\n")
 cat("=====================================\n")
 print(summary_out, row.names=FALSE)
 cat("\nMethod: fgsea::collapsePathways; conditional dependence threshold p = 0.05; nperm = 2000.\n")
-cat("This replaces the arbitrary Jaccard-similarity reduction for the NP-ranked pathway analysis.\n")
-cat("No limma statistics were used.\n")
+cat("This replaces the earlier Jaccard-similarity reduction for the nonparametric preranked pathway analysis.\n")
+cat("No limma statistics were used in pathway collapsing.\n")
 cat("Results folder:", normalizePath(outdir), "\n")

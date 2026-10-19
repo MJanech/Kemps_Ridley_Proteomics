@@ -1,9 +1,15 @@
+# ==============================================================================
+# PCA_PERMANOVA_PERMDISP_Figures4_5.R
+#
 # PCA / PERMANOVA / PERMDISP figures for publication
 # Kemp's ridley plasma proteomics
 #
 # INPUT:
-#   Supplemental_Tables_1_through_8.xlsx
+#   Supplemental_Tables_1_through_8_Limma_Primary.xlsx
 #   Sheet: Table S3
+#
+# The revised workbook changes the statistical presentation in Tables S4-S7;
+# Table S3 remains the source of the original weighted spectral count matrix.
 #
 # OUTPUT:
 #   Results are written in the same folder as the input workbook.
@@ -42,27 +48,33 @@ set.seed(20260824)
 # -------------------------------------------------------------------------
 # 1. Locate the workbook
 # -------------------------------------------------------------------------
-input_name <- "Supplemental_Tables_1_through_8.xlsx"
-args <- commandArgs(trailingOnly = TRUE)
+input_name <- "Supplemental_Tables_1_through_8_Limma_Primary.xlsx"
 
-input_file <- if (length(args) >= 1 && nzchar(args[1])) {
-  args[1]
+possible_inputs <- unique(c(
+  file.path(getwd(), input_name),
+  list.files(getwd(), pattern = "^Supplemental.*\\.xlsx$", full.names = TRUE)
+))
+possible_inputs <- possible_inputs[file.exists(possible_inputs)]
+
+if (length(possible_inputs) > 0) {
+  input_file <- possible_inputs[1]
 } else {
-  file.path(getwd(), input_name)
-}
-
-if (!file.exists(input_file)) {
-  stop(
-    "Input workbook not found: ", input_file, "\n",
-    "Place ", input_name, " in the working directory or provide its path as the first command-line argument."
+  message(
+    "I could not automatically find ", input_name,
+    ".\nPlease select the workbook in the file-selection window."
   )
+  input_file <- file.choose()
 }
 
 if (!grepl("\\.xls[x]?$", input_file, ignore.case = TRUE)) {
-  stop("The selected input does not look like an Excel workbook: ", input_file)
+  stop(
+    "The selected file does not look like an Excel workbook.\n",
+    "Please run the script again and choose Supplemental_Tables_1_through_8_Limma_Primary.xlsx."
+  )
 }
 
 cat("Using input workbook:\n", input_file, "\n\n")
+cat("Table S3 will be used as the wSC source; Tables S4-S7 are not read by this script.\n\n")
 
 out_dir <- dirname(normalizePath(input_file, winslash = "/", mustWork = TRUE))
 cat("Results will be written to:\n", out_dir, "\n\n")
@@ -71,14 +83,23 @@ cat("Results will be written to:\n", out_dir, "\n\n")
 # 2. Read Table S3
 # -------------------------------------------------------------------------
 dat <- read_excel(input_file, sheet = "Table S3", skip = 3)
+names(dat) <- trimws(gsub("[[:space:]]+", " ", names(dat)))
 
-sample_cols <- 9:56
+# Detect the 48 biological sample columns by their manuscript sample names rather
+# than fixed column numbers. This makes the script tolerant of metadata/statistic
+# columns being added elsewhere in the Supporting Information workbook.
+sample_cols <- which(
+  grepl("^Sample\\s*[0-9]{3}[AB]$", names(dat), ignore.case = TRUE)
+)
 
-if (ncol(dat) < max(sample_cols)) {
-  stop("Table S3 does not contain the expected 48 sample columns.")
+if (length(sample_cols) != 48) {
+  stop(
+    "Expected 48 sample columns in Table S3 but found ",
+    length(sample_cols), "."
+  )
 }
 
-abund <- as.matrix(dat[, sample_cols])
+abund <- as.matrix(dat[, sample_cols, drop = FALSE])
 storage.mode(abund) <- "numeric"
 
 if (anyNA(abund)) {
@@ -90,9 +111,48 @@ if (anyNA(abund)) {
 
 sample_names <- names(dat)[sample_cols]
 
-protein_label <- if (ncol(dat) >= 2) as.character(dat[[2]]) else paste0("Protein_", seq_len(nrow(dat)))
-gene_label    <- if (ncol(dat) >= 3) as.character(dat[[3]]) else NA_character_
-accession     <- if ("Accession Number" %in% names(dat)) as.character(dat[["Accession Number"]]) else NA_character_
+normalize_header <- function(x) {
+  tolower(trimws(gsub("[[:space:]]+", " ", x)))
+}
+
+find_required_column <- function(candidates, label) {
+  normalized <- normalize_header(names(dat))
+  targets <- normalize_header(candidates)
+  hit <- which(normalized %in% targets)
+
+  if (length(hit) == 0) {
+    stop(
+      "Could not identify the Table S3 ", label, " column.\n",
+      "Expected one of: ", paste(candidates, collapse = ", "), "\n",
+      "Available columns include: ", paste(head(names(dat), 12), collapse = ", ")
+    )
+  }
+
+  names(dat)[hit[1]]
+}
+
+protein_col <- find_required_column(
+  c("Identified Proteins", "Identified.Proteins", "Protein"),
+  "protein-name"
+)
+gene_col <- find_required_column(
+  c("Gene Name", "Gene.Name", "Gene"),
+  "gene-name"
+)
+accession_col <- find_required_column(
+  c("Accession Number", "Accession.Number", "Accession"),
+  "accession"
+)
+
+protein_label <- trimws(as.character(dat[[protein_col]]))
+gene_label <- trimws(as.character(dat[[gene_col]]))
+accession <- trimws(as.character(dat[[accession_col]]))
+
+cat(
+  "Detected Table S3 metadata columns: ",
+  protein_col, " | ", gene_col, " | ", accession_col, "\n\n",
+  sep = ""
+)
 
 X <- t(abund)
 
@@ -867,7 +927,7 @@ publication_readme <- c(
   "Kemp's ridley plasma proteomics - publication Figures 4 and 5",
   "",
   "Source data:",
-  "- Supplemental_Tables_1_through_8.xlsx, Table S3",
+  "- Supplemental_Tables_1_through_8_Limma_Primary.xlsx, Table S3",
   "- Original Scaffold weighted spectral counts (wSC)",
   "- Numerical zeros retained as Scaffold-exported non-detections",
   "- No missing values imputed",

@@ -1,19 +1,16 @@
 # ==============================================================================
-# Figures8_9_violin_plots.R
+# Figures8_9_violin_plots_LIMMA_PRIMARY.R
 #
-# Purpose
-#   Reproduce Figures 8 and 9 from the Kemp's ridley sea turtle plasma
-#   proteomics manuscript.
-#
+# 
 # Input
-#   Supplemental_Tables_1_through_8.xlsx
+#   Supplemental_Tables_1_through_8_Limma_Primary.xlsx
 #
 # Data source
 #   - Figure values are original, untransformed weighted spectral counts (wSC)
 #     from Table S3.
-#   - BH-adjusted p-values are read directly from the paired Wilcoxon results:
-#       Table S6 = OC2 admission vs release
-#       Table S7 = OC4 admission vs release
+#   - BH FDR values are read directly from the primary limma-trend results:
+#       Table S6 = OC2 admission vs rehabilitation
+#       Table S7 = OC4 admission vs rehabilitation
 #   - No abundance values are transformed or imputed for these figures.
 #
 # Figure structure
@@ -27,19 +24,13 @@
 #   - individual raw wSC observations
 #   - lines connecting paired admission/release samples from the same turtle
 #   - dashed horizontal median lines
-#   - BH-adjusted p-values from Tables S6 and S7
+#   - limma-trend BH FDR values from Tables S6 and S7
 #
 # Important
 #   If a protein was excluded from a paired comparison by the manuscript's
 #   comparison-specific zero-value filter, the plot is labeled "not tested"
 #   for that comparison rather than assigning a p-value.
 #
-# Usage
-#   Place this script and the supplemental workbook in the same directory:
-#       source("Figures8_9_violin_plots.R")
-#
-#   Or provide the workbook path from the command line:
-#       Rscript Figures8_9_violin_plots.R path/to/workbook.xlsx
 # ==============================================================================
 
 required_packages <- c("readxl", "ggplot2", "patchwork")
@@ -60,6 +51,11 @@ library(readxl)
 library(ggplot2)
 library(patchwork)
 
+# Register Arial explicitly on Windows so ggplot/grid can find it.
+if (.Platform$OS.type == "windows") {
+  windowsFonts(Arial = windowsFont("Arial"))
+}
+
 # ------------------------------------------------------------------------------
 # Input/output
 # ------------------------------------------------------------------------------
@@ -69,7 +65,7 @@ args <- commandArgs(trailingOnly = TRUE)
 input_file <- if (length(args) >= 1) {
   args[1]
 } else {
-  "Supplemental_Tables_1_through_8.xlsx"
+  "Supplemental_Tables_1_through_8_Limma_Primary.xlsx"
 }
 
 if (!file.exists(input_file)) {
@@ -79,7 +75,7 @@ if (!file.exists(input_file)) {
   )
 }
 
-output_dir <- "Figures8_9_outputs"
+output_dir <- "Figures8_9_outputs_limma"
 dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
 # ------------------------------------------------------------------------------
@@ -148,19 +144,19 @@ s7_acc_col <- find_column(
   c("Accession Number", "Accession.Number", "Accession")
 )
 
-s6_padj_col <- find_column(
+s6_fdr_col <- find_column(
   s6,
-  c("padj_BH", "padj BH", "BH adjusted p-value")
+  c("limma-trend BH FDR")
 )
 
-s7_padj_col <- find_column(
+s7_fdr_col <- find_column(
   s7,
-  c("padj_BH", "padj BH", "BH adjusted p-value")
+  c("limma-trend BH FDR")
 )
 
 required_detected <- c(
   s3_acc_col, s3_protein_col, s3_gene_col,
-  s6_acc_col, s7_acc_col, s6_padj_col, s7_padj_col
+  s6_acc_col, s7_acc_col, s6_fdr_col, s7_fdr_col
 )
 
 if (any(is.na(required_detected))) {
@@ -202,7 +198,7 @@ if (length(sample_cols) != 48) {
 # Protein definitions and display precision
 #
 # The displayed number of decimal places matches the finalized manuscript
-# figures. Exact BH-adjusted p-values are still written to the audit CSV.
+# figures. Exact limma-trend BH FDR values are still written to the audit CSV.
 # ------------------------------------------------------------------------------
 
 fig8_spec <- data.frame(
@@ -261,10 +257,10 @@ all_specs <- rbind(
 )
 
 # ------------------------------------------------------------------------------
-# Retrieve exact BH-adjusted p-values from Tables S6 and S7
+# Retrieve exact limma-trend BH FDR values from Tables S6 and S7
 # ------------------------------------------------------------------------------
 
-get_padj <- function(data, accession_col, padj_col, accession) {
+get_fdr <- function(data, accession_col, fdr_col, accession) {
   hit <- which(trimws(as.character(data[[accession_col]])) == accession)
 
   if (length(hit) == 0) {
@@ -278,52 +274,55 @@ get_padj <- function(data, accession_col, padj_col, accession) {
     )
   }
 
-  suppressWarnings(as.numeric(data[[padj_col]][hit[1]]))
+  suppressWarnings(as.numeric(data[[fdr_col]][hit[1]]))
 }
 
-format_padj <- function(value, digits) {
+format_fdr <- function(value, digits) {
   if (is.na(value)) {
     return(NA_character_)
   }
-
-  formatC(
-    value,
-    format = "f",
-    digits = digits
-  )
+  
+  if (value < 0.001) {
+    return(formatC(value, format = "e", digits = 0))
+  }
+  
+  if (value < 0.01) {
+    return(formatC(value, format = "f", digits = 3))
+  }
+  
+  formatC(value, format = "f", digits = 2)
 }
-
 stats_audit <- all_specs
 
-stats_audit$OC2_padj_exact <- vapply(
+stats_audit$OC2_fdr_exact <- vapply(
   stats_audit$Accession,
-  function(acc) get_padj(s6, s6_acc_col, s6_padj_col, acc),
+  function(acc) get_fdr(s6, s6_acc_col, s6_fdr_col, acc),
   numeric(1)
 )
 
-stats_audit$OC4_padj_exact <- vapply(
+stats_audit$OC4_fdr_exact <- vapply(
   stats_audit$Accession,
-  function(acc) get_padj(s7, s7_acc_col, s7_padj_col, acc),
+  function(acc) get_fdr(s7, s7_acc_col, s7_fdr_col, acc),
   numeric(1)
 )
 
 stats_audit$OC2_label <- mapply(
-  format_padj,
-  stats_audit$OC2_padj_exact,
+  format_fdr,
+  stats_audit$OC2_fdr_exact,
   stats_audit$OC2_digits,
   USE.NAMES = FALSE
 )
 
 stats_audit$OC4_label <- mapply(
-  format_padj,
-  stats_audit$OC4_padj_exact,
+  format_fdr,
+  stats_audit$OC4_fdr_exact,
   stats_audit$OC4_digits,
   USE.NAMES = FALSE
 )
 
 write.csv(
   stats_audit,
-  file.path(output_dir, "Figures8_9_statistics_audit.csv"),
+  file.path(output_dir, "Figures8_9_limma_statistics_audit.csv"),
   row.names = FALSE,
   na = ""
 )
@@ -473,13 +472,15 @@ make_panel <- function(
   d <- protein_long(accession)
 
   ymax <- max(d$wSC, na.rm = TRUE)
-
+  
   if (!is.finite(ymax) || ymax <= 0) {
     ymax <- 1
   }
-
-  top_limit <- ymax * 1.045
-  annotation_y <- ymax * 0.915
+  
+    upper_pad <- max(0.75, 0.18 * ymax)
+  
+  top_limit <- ymax + upper_pad
+  annotation_y <- ymax + 0.72 * upper_pad
 
   p <- ggplot(
     d,
@@ -584,7 +585,7 @@ make_panel <- function(
       )
     )
 
-  # OC2 paired Wilcoxon BH FDR
+  # OC2 limma-trend BH FDR
   if (is.na(oc2_label)) {
     p <- p + annotate(
       "text",
@@ -600,14 +601,14 @@ make_panel <- function(
       "text",
       x = 1.42,
       y = annotation_y,
-      label = paste0("p[adj] == ", oc2_label),
-      parse = TRUE,
+      label = paste0("FDR = ", oc2_label),
+      parse = FALSE,
       family = "Arial",
       size = 3.00
     )
   }
 
-  # OC4 paired Wilcoxon BH FDR
+  # OC4 limma-trend BH FDR
   if (is.na(oc4_label)) {
     p <- p + annotate(
       "text",
@@ -623,8 +624,8 @@ make_panel <- function(
       "text",
       x = 3.42,
       y = annotation_y,
-      label = paste0("p[adj] == ", oc4_label),
-      parse = TRUE,
+      label = paste0("FDR = ", oc4_label),
+      parse = FALSE,
       family = "Arial",
       size = 3.00
     )
@@ -742,38 +743,43 @@ ggsave(
 )
 
 # ------------------------------------------------------------------------------
-# Reproducibility checks for the finalized figure statistics
+# Reproducibility checks for the primary limma-trend figure statistics
 # ------------------------------------------------------------------------------
 
-# Figure 8
+fig8_check <- stats_audit$Figure == "Figure 8"
+fig9_check <- stats_audit$Figure == "Figure 9"
+
+# Every plotted protein should have an OC2 limma-trend result.
 stopifnot(
-  isTRUE(all.equal(
-    stats_audit$OC2_padj_exact[
-      stats_audit$Accession == "XP_073178819.1"
-    ],
-    0.0515919811320755,
-    tolerance = 1e-12
-  )),
-  isTRUE(all.equal(
-    stats_audit$OC4_padj_exact[
-      stats_audit$Accession == "XP_073178819.1"
-    ],
-    0.000962690873579545,
-    tolerance = 1e-12
-  ))
+  all(!is.na(stats_audit$OC2_fdr_exact))
 )
 
-# Figure 9 panel H (GPI) was retained in S6 but excluded from S7 by the
-# comparison-specific zero-value filter. Therefore OC4 is correctly labeled
-# "not tested".
+# Figure 8:
+#   4 of 6 proteins are significant in OC2 by limma-trend.
+#   All 6 proteins are significant in OC4 by limma-trend.
+stopifnot(
+  sum(stats_audit$OC2_fdr_exact[fig8_check] < 0.05, na.rm = TRUE) == 4,
+  sum(stats_audit$OC4_fdr_exact[fig8_check] < 0.05, na.rm = TRUE) == 6
+)
+
+# Figure 9:
+#   All 8 proteins are significant in OC2 by limma-trend.
+#   Seven are significant/tested in OC4; GPI was excluded from the OC4 paired
+#   comparison by the comparison-specific detection filter.
+stopifnot(
+  sum(stats_audit$OC2_fdr_exact[fig9_check] < 0.05, na.rm = TRUE) == 8,
+  sum(stats_audit$OC4_fdr_exact[fig9_check] < 0.05, na.rm = TRUE) == 7
+)
+
+# GPI (Figure 9H) must remain "not tested" for OC4.
 stopifnot(
   !is.na(
-    stats_audit$OC2_padj_exact[
+    stats_audit$OC2_fdr_exact[
       stats_audit$Accession == "XP_073164022.1"
     ]
   ),
   is.na(
-    stats_audit$OC4_padj_exact[
+    stats_audit$OC4_fdr_exact[
       stats_audit$Accession == "XP_073164022.1"
     ]
   )
@@ -781,5 +787,5 @@ stopifnot(
 
 message("Figures 8 and 9 completed successfully.")
 message("Data source: original, untransformed Table S3 wSC values.")
-message("Statistics source: Tables S6 and S7 BH-adjusted paired Wilcoxon results.")
+message("Statistics source: Tables S6 and S7 primary limma-trend BH FDR results.")
 message("Outputs written to: ", normalizePath(output_dir))
